@@ -427,3 +427,210 @@ export const githubGrillerFunction = onCallGenkit(
   },
   githubGrillerFlow,
 );
+
+// =============================
+// BillIntel – Billing Analytics
+// =============================
+
+// Billing record schema for CSV/JSON rows
+const billingRecordSchema = z.object({
+  customer_id: z.string(),
+  plan: z.string(),
+  data_used: z.number(),
+  amount_billed: z.number(),
+  billing_date: z.string(), // ISO date string
+});
+
+const billingArraySchema = z.array(billingRecordSchema);
+
+// Helper: parse CSV into records matching schema keys
+function parseCsvToRecords(csv: string): Array<Record<string, string>> {
+  const lines = csv.trim().split(/\r?\n/);
+  if (lines.length === 0) return [];
+  const headers = lines[0].split(',').map((h) => h.trim());
+  const rows = lines.slice(1);
+  return rows
+    .filter((r) => r.trim().length > 0)
+    .map((row) => {
+      const cols = row.split(',');
+      const record: Record<string, string> = {};
+      headers.forEach((h, i) => {
+        record[h] = (cols[i] ?? '').trim();
+      });
+      return record;
+    });
+}
+
+// Helper: coerce parsed CSV string values to billing types
+function coerceRecords(records: Array<Record<string, string>>) {
+  return records.map((r) => ({
+    customer_id: String(r.customer_id ?? ''),
+    plan: String(r.plan ?? ''),
+    data_used: Number(r.data_used ?? 0),
+    amount_billed: Number(r.amount_billed ?? 0),
+    billing_date: String(r.billing_date ?? ''),
+  }));
+}
+
+// Core stats computation (non-AI)
+function computeBillingStats(data: z.infer<typeof billingArraySchema>) {
+  if (data.length === 0) {
+    return {
+      totalRevenue: 0,
+      avgBillPerCustomer: 0,
+      monthlyRevenue: {} as Record<string, number>,
+      customerTotals: {} as Record<string, number>,
+      topCustomers: [] as Array<{ customer_id: string; total: number }>,
+      planTotals: {} as Record<string, { revenue: number; usage: number }>,
+    };
+  }
+
+  const monthlyRevenue: Record<string, number> = {};
+  const customerTotals: Record<string, number> = {};
+  const planTotals: Record<string, { revenue: number; usage: number }> = {};
+  let totalRevenue = 0;
+
+  for (const r of data) {
+    totalRevenue += r.amount_billed;
+
+    const monthKey = r.billing_date.slice(0, 7); // YYYY-MM
+    monthlyRevenue[monthKey] = (monthlyRevenue[monthKey] || 0) + r.amount_billed;
+
+    customerTotals[r.customer_id] = (customerTotals[r.customer_id] || 0) + r.amount_billed;
+
+    if (!planTotals[r.plan]) planTotals[r.plan] = { revenue: 0, usage: 0 };
+    planTotals[r.plan].revenue += r.amount_billed;
+    planTotals[r.plan].usage += r.data_used;
+  }
+
+  const uniqueCustomers = Object.keys(customerTotals).length || 1;
+  const avgBillPerCustomer = totalRevenue / uniqueCustomers;
+
+  const topCustomers = Object.entries(customerTotals)
+    .map(([customer_id, total]) => ({ customer_id, total }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 10);
+
+  return {
+    totalRevenue,
+    avgBillPerCustomer,
+    monthlyRevenue,
+    customerTotals,
+    topCustomers,
+    planTotals,
+  };
+}
+
+// Heuristic anomalies and health score
+function detectAnomaliesAndScore(
+  data: z.infer<typeof billingArraySchema>,
+  stats: ReturnType<typeof computeBillingStats>,
+) {
+  const anomalies: Array<string> = [];
+
+  for (const r of data) {
+    if (r.data_used > 0 && r.amount_billed === 0) {
+      anomalies.push(`Customer ${r.customer_id} shows usage but was billed $0 on ${r.billing_date}.`);
+    }
+    if (r.data_used === 0 && r.amount_billed > 0) {
+      anomalies.push(`Customer ${r.customer_id} billed ${r.amount_billed} with zero usage on ${r.billing_date}.`);
+    }
+  }
+
+  const monthly = Object.values(stats.monthlyRevenue);
+  if (monthly.length >= 3) {
+    const last = monthly[monthly.length - 1];
+    const prev = monthly[monthly.length - 2];
+    if (prev > 0 && Math.abs(last - prev) / prev > 0.35) {
+      anomalies.push('Significant month-over-month revenue change detected (>35%).');
+    }
+  }
+
+  const anomalyPenalty = Math.min(anomalies.length * 5, 40);
+  const consistencyBonus = monthly.length >= 3 ? 10 : 0;
+  const base = 85 + consistencyBonus - anomalyPenalty;
+  const healthScore = Math.max(0, Math.min(100, Math.round(base)));
+
+  return { anomalies, healthScore };
+}
+
+// BillIntel Flow
+const billIntelFlow = ai.defineFlow(
+  {
+    name: 'billIntelFlow',
+    inputSchema: z.object({
+      // Either JSON array of records, or CSV string
+      data_json: billingArraySchema.optional(),
+      data_csv: z.string().optional(),
+      period: z.enum(['adhoc', 'weekly', 'monthly']).default('adhoc'),
+    }),
+    outputSchema: z.object({
+      stats: z.object({
+        totalRevenue: z.number(),
+        avgBillPerCustomer: z.number(),
+        monthlyRevenue: z.record(z.string(), z.number()),
+        topCustomers: z.array(z.object({ customer_id: z.string(), total: z.number() })),
+        planTotals: z.record(z.string(), z.object({ revenue: z.number(), usage: z.number() })),
+      }),
+      anomalies: z.array(z.string()),
+      healthScore: z.number(),
+      insights: z.string(),
+    }),
+  },
+  async ({ data_json, data_csv, period }) => {
+    let rows: z.infer<typeof billingArraySchema> = [];
+
+    if (data_json && data_json.length) {
+      rows = billingArraySchema.parse(data_json);
+    } else if (data_csv && data_csv.trim().length > 0) {
+      const parsed = coerceRecords(parseCsvToRecords(data_csv));
+      rows = billingArraySchema.parse(parsed);
+    }
+
+    const stats = computeBillingStats(rows);
+    const { anomalies, healthScore } = detectAnomaliesAndScore(rows, stats);
+
+    const { text } = await ai.generate({
+      prompt: `
+You are BillIntel, an AI billing analyst for ISPs.
+Summarize the dataset with:
+- Total revenue
+- Average bill per customer
+- Monthly trends (brief)
+- Top paying customers (up to 5)
+- Low-margin plans (high usage, low revenue)
+- Bullet a few anomalies if any
+Provide a concise narrative (120-200 words). Period: ${period}.
+
+DATA (JSON): ${JSON.stringify({
+  totalRevenue: stats.totalRevenue,
+  avgBillPerCustomer: stats.avgBillPerCustomer,
+  monthlyRevenue: stats.monthlyRevenue,
+  topCustomers: stats.topCustomers,
+  planTotals: stats.planTotals,
+  anomalies,
+  healthScore,
+})}
+`,
+      config: { temperature: 0.4 },
+    });
+
+    return {
+      stats: {
+        totalRevenue: stats.totalRevenue,
+        avgBillPerCustomer: stats.avgBillPerCustomer,
+        monthlyRevenue: stats.monthlyRevenue,
+        topCustomers: stats.topCustomers,
+        planTotals: stats.planTotals,
+      },
+      anomalies,
+      healthScore,
+      insights: text,
+    };
+  },
+);
+
+export const billIntelAnalyzeFunction = onCallGenkit(
+  { secrets: [geminiApiKey] },
+  billIntelFlow,
+);

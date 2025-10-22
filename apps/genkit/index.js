@@ -1,0 +1,287 @@
+import { __awaiter } from "tslib";
+import { onCall } from 'firebase-functions/v2/https';
+import { z } from 'zod';
+import { initializeApp } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
+// Initialize Firebase Admin
+initializeApp();
+const db = getFirestore();
+// Simplified BillIntel flow for emulator testing
+const billingRecordSchema = z.object({
+    customer_id: z.string(),
+    plan: z.string(),
+    data_used: z.number(),
+    amount_billed: z.number(),
+    billing_date: z.string(),
+});
+// Helper function to parse CSV data
+function parseCsvToRecords(csvData) {
+    const lines = csvData.trim().split('\n');
+    const headers = lines[0].split(',').map((h) => h.trim());
+    return lines.slice(1).map((line) => {
+        const values = line.split(',').map((v) => v.trim());
+        const record = {};
+        headers.forEach((header, index) => {
+            const value = values[index];
+            if (header === 'data_used' || header === 'amount_billed') {
+                record[header] = parseFloat(value) || 0;
+            }
+            else {
+                record[header] = value;
+            }
+        });
+        return record;
+    });
+}
+// Helper function to coerce data types
+function coerceRecords(records) {
+    return records.map((record) => ({
+        customer_id: String(record.customer_id),
+        plan: String(record.plan),
+        data_used: Number(record.data_used) || 0,
+        amount_billed: Number(record.amount_billed) || 0,
+        billing_date: String(record.billing_date),
+    }));
+}
+// Helper function to compute billing statistics
+function computeBillingStats(records) {
+    const totalRevenue = records.reduce((sum, record) => sum + record.amount_billed, 0);
+    const avgBillPerCustomer = totalRevenue / records.length;
+    // Group by month for monthly revenue
+    const monthlyRevenue = {};
+    records.forEach((record) => {
+        const date = new Date(record.billing_date);
+        const month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        monthlyRevenue[month] = (monthlyRevenue[month] || 0) + record.amount_billed;
+    });
+    // Top customers
+    const customerTotals = {};
+    records.forEach((record) => {
+        customerTotals[record.customer_id] =
+            (customerTotals[record.customer_id] || 0) + record.amount_billed;
+    });
+    const topCustomers = Object.entries(customerTotals)
+        .map(([customer_id, total]) => ({ customer_id, total }))
+        .sort((a, b) => b.total - a.total)
+        .slice(0, 5);
+    // Plan totals
+    const planTotals = {};
+    records.forEach((record) => {
+        if (!planTotals[record.plan]) {
+            planTotals[record.plan] = { revenue: 0, usage: 0 };
+        }
+        planTotals[record.plan].revenue += record.amount_billed;
+        planTotals[record.plan].usage += record.data_used;
+    });
+    return {
+        totalRevenue,
+        avgBillPerCustomer,
+        monthlyRevenue,
+        topCustomers,
+        planTotals,
+    };
+}
+// Helper function to detect anomalies and calculate health score
+function detectAnomaliesAndScore(records, stats) {
+    const anomalies = [];
+    let healthScore = 100;
+    // Check for billing anomalies
+    records.forEach((record, index) => {
+        const expectedBill = record.data_used * 0.5; // Assume $0.5 per GB
+        const billDifference = Math.abs(record.amount_billed - expectedBill);
+        if (billDifference > expectedBill * 0.2) {
+            // 20% threshold
+            anomalies.push(`Customer ${record.customer_id} has unusual billing: KSH${record.amount_billed} for ${record.data_used}GB`);
+            healthScore -= 5;
+        }
+    });
+    // Check for missing data
+    const requiredFields = [
+        'customer_id',
+        'plan',
+        'data_used',
+        'amount_billed',
+        'billing_date',
+    ];
+    records.forEach((record, index) => {
+        requiredFields.forEach((field) => {
+            if (!record[field] || record[field] === '') {
+                anomalies.push(`Record ${index + 1} missing ${field}`);
+                healthScore -= 2;
+            }
+        });
+    });
+    // Check for negative values
+    records.forEach((record, index) => {
+        if (record.amount_billed < 0 || record.data_used < 0) {
+            anomalies.push(`Record ${index + 1} has negative values`);
+            healthScore -= 10;
+        }
+    });
+    return { anomalies, healthScore: Math.max(0, healthScore) };
+}
+// Main analysis function
+function analyzeBillingData(_a) {
+    return __awaiter(this, arguments, void 0, function* ({ csv_data, json_data, }) {
+        let records = [];
+        if (csv_data) {
+            const parsedRecords = parseCsvToRecords(csv_data);
+            records = coerceRecords(parsedRecords);
+        }
+        else if (json_data) {
+            records = coerceRecords(json_data);
+        }
+        else {
+            throw new Error('No data provided');
+        }
+        // Generate session ID
+        const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        // Compute statistics
+        const stats = computeBillingStats(records);
+        // Detect anomalies and calculate health score
+        const { anomalies, healthScore } = detectAnomaliesAndScore(records, stats);
+        // Generate AI insights (simplified for emulator)
+        const insights = `BillIntel Analysis Complete. Total Revenue: KSH${stats.totalRevenue.toFixed(2)}, Health Score: ${healthScore}/100. ${anomalies.length} anomalies detected. Review the detailed metrics for actionable insights.`;
+        return {
+            session_id: sessionId,
+            stats,
+            anomalies,
+            healthScore,
+            insights,
+        };
+    });
+}
+// Helper function to save analysis to Firestore
+function saveAnalysisToFirestore(userId, sessionId, analysisData) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            const analysisRef = db.collection('analysis_results').doc(sessionId);
+            yield analysisRef.set(Object.assign(Object.assign({ userId,
+                sessionId }, analysisData), { createdAt: new Date(), updatedAt: new Date() }));
+            return { success: true, id: sessionId };
+        }
+        catch (error) {
+            console.error('Error saving analysis to Firestore:', error);
+            return { success: false, error: error.message };
+        }
+    });
+}
+// Helper function to save billing records to Firestore
+function saveBillingRecordsToFirestore(userId, records) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            const batch = db.batch();
+            const recordsRef = db.collection('billing_records');
+            records.forEach((record) => {
+                const docRef = recordsRef.doc();
+                batch.set(docRef, Object.assign(Object.assign({ userId }, record), { createdAt: new Date() }));
+            });
+            yield batch.commit();
+            return { success: true, count: records.length };
+        }
+        catch (error) {
+            console.error('Error saving billing records to Firestore:', error);
+            return { success: false, error: error.message };
+        }
+    });
+}
+// Helper function to get user analyses from Firestore
+function getUserAnalysesFromFirestore(userId_1) {
+    return __awaiter(this, arguments, void 0, function* (userId, limit = 20) {
+        try {
+            const analysesRef = db
+                .collection('analysis_results')
+                .where('userId', '==', userId)
+                .orderBy('createdAt', 'desc')
+                .limit(limit);
+            const snapshot = yield analysesRef.get();
+            const analyses = snapshot.docs.map((doc) => (Object.assign({ id: doc.id }, doc.data())));
+            return { success: true, data: analyses };
+        }
+        catch (error) {
+            console.error('Error getting user analyses from Firestore:', error);
+            // Return empty data instead of failing
+            return { success: true, data: [], error: 'Firestore not available' };
+        }
+    });
+}
+// Export the main analysis function
+export const billIntelAnalyzeFunction = onCall({
+    region: 'us-central1',
+}, (request) => __awaiter(void 0, void 0, void 0, function* () {
+    const { csv_data, json_data, userId } = request.data;
+    const result = yield analyzeBillingData({ csv_data, json_data });
+    // Save to Firestore if userId is provided
+    if (userId) {
+        yield saveAnalysisToFirestore(userId, result.session_id, result);
+    }
+    return result;
+}));
+// Export function to get user analyses
+export const getUserAnalyses = onCall({
+    region: 'us-central1',
+}, (request) => __awaiter(void 0, void 0, void 0, function* () {
+    const { userId, limit = 20 } = request.data;
+    return yield getUserAnalysesFromFirestore(userId, limit);
+}));
+// Export function to save billing records
+export const saveBillingRecords = onCall({
+    region: 'us-central1',
+}, (request) => __awaiter(void 0, void 0, void 0, function* () {
+    const { userId, records } = request.data;
+    return yield saveBillingRecordsToFirestore(userId, records);
+}));
+// Export function to get user dashboard data
+export const getUserDashboard = onCall({
+    region: 'us-central1',
+}, (request) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    const { userId } = request.data;
+    try {
+        // Get user's analyses
+        const analysesResult = yield getUserAnalysesFromFirestore(userId, 50);
+        // Handle case where Firestore is not available
+        if (!analysesResult.success &&
+            analysesResult.error === 'Firestore not available') {
+            return {
+                success: true,
+                data: {
+                    total_analyses: 0,
+                    total_revenue_analyzed: 0,
+                    recent_analyses: [],
+                    message: 'No historical data available (Firestore not connected)',
+                },
+            };
+        }
+        if (!analysesResult.success) {
+            throw new Error(analysesResult.error);
+        }
+        const analyses = analysesResult.data;
+        const totalAnalyses = analyses.length;
+        let totalRevenue = 0;
+        for (const analysis of analyses) {
+            totalRevenue += ((_a = analysis.stats) === null || _a === void 0 ? void 0 : _a.totalRevenue) || 0;
+        }
+        return {
+            success: true,
+            data: {
+                total_analyses: totalAnalyses,
+                total_revenue_analyzed: totalRevenue,
+                recent_analyses: analyses.slice(0, 5),
+            },
+        };
+    }
+    catch (error) {
+        console.error('Error getting user dashboard:', error);
+        return {
+            success: true,
+            data: {
+                total_analyses: 0,
+                total_revenue_analyzed: 0,
+                recent_analyses: [],
+                message: 'Dashboard data not available',
+            },
+        };
+    }
+}));
+//# sourceMappingURL=index.js.map

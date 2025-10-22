@@ -5,21 +5,20 @@
   "sourceRoot": "apps/billintel-web/src",
   "targets": {
     "build": {
-      "executor": "@nx/web:build",
+      "executor": "@nx/vite:build",
       "outputs": ["{options.outputPath}"],
       "options": {
         "outputPath": "dist/apps/billintel-web",
-        "index": "apps/billintel-web/index.html",
-        "baseHref": "/",
-        "tsConfig": "apps/billintel-web/tsconfig.json",
-        "assets": ["apps/billintel-web/public"],
-        "styles": ["apps/billintel-web/src/index.css"]
+        "configFile": "apps/billintel-web/vite.config.ts",
+        "root": "apps/billintel-web"
       }
     },
     "serve": {
-      "executor": "@nx/web:dev-server",
+      "executor": "@nx/vite:dev-server",
       "options": {
-        "buildTarget": "billintel-web:build"
+        "buildTarget": "billintel-web:build",
+        "configFile": "apps/billintel-web/vite.config.ts",
+        "root": "apps/billintel-web"
       }
     },
     "lint": {

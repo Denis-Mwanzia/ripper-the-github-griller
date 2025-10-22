@@ -76,7 +76,7 @@ export const App: React.FC = () => {
       }
 
       const res = await fetch(
-        'http://localhost:5001/gen-lang-client-0921236969/us-central1/billIntelAnalyzeFunction',
+        'http://localhost:5002/gen-lang-client-0921236969/us-central1/billIntelAnalyzeFunction',
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

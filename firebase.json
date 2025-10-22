@@ -1,8 +1,9 @@
 {
   "functions": [
     {
-      "source": "dist/apps/genkit",
+      "source": "apps/genkit",
       "codebase": "default",
+      "runtime": "nodejs22",
       "ignore": [
         "node_modules",
         ".git",
@@ -13,10 +14,7 @@
         "firebase-debug.log",
         "firebase-debug.*.log"
       ],
-      "predeploy": [
-        "pnpm nx run genkit:build",
-        "echo 'Functions built successfully.'"
-      ]
+      "predeploy": ["echo 'Functions built successfully.'"]
     }
   ],
   "hosting": {
@@ -42,17 +40,26 @@
   },
   "emulators": {
     "functions": {
-      "port": 5001
+      "port": 5002
     },
     "firestore": {
-      "port": 8081
+      "port": 8082
+    },
+    "auth": {
+      "port": 9098
     },
     "storage": {
-      "port": 9199
+      "port": 9198
     },
     "ui": {
       "enabled": true,
-      "port": 4001
+      "port": 4003
+    },
+    "hub": {
+      "port": 4403
+    },
+    "logging": {
+      "port": 4503
     },
     "singleProjectMode": true
   }

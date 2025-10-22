@@ -8,7 +8,7 @@ import {
   BarChart3,
   Calendar,
 } from 'lucide-react';
-import { UserDataService } from '../services/userDataFirebase';
+import { UserDataServiceLocal } from '../services/userDataLocal';
 import { formatCurrency } from '../utils/currency';
 
 interface HistoricalAnalysisProps {
@@ -59,7 +59,7 @@ export const HistoricalAnalysis: React.FC<HistoricalAnalysisProps> = ({
 
       try {
         setHistoryLoading(true);
-        const { data, error } = await UserDataService.getUserAnalyses(
+        const { data, error } = await UserDataServiceLocal.getUserAnalyses(
           userId,
           20,
         );

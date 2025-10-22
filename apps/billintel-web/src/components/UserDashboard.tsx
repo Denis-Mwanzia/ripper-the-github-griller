@@ -9,7 +9,7 @@ import {
   FileText,
   Activity,
 } from 'lucide-react';
-import { UserDataService } from '../services/userDataFirebase';
+import { UserDataServiceLocal } from '../services/userDataLocal';
 import { UserDashboard as UserDashboardType } from '../services/userDataFirebase';
 import { formatCurrency } from '../utils/currency';
 
@@ -26,7 +26,8 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ userId }) => {
     const loadDashboard = async () => {
       try {
         setLoading(true);
-        const { data, error } = await UserDataService.getUserDashboard(userId);
+        const { data, error } =
+          await UserDataServiceLocal.getUserDashboard(userId);
 
         if (error) {
           setError(error);

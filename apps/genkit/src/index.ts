@@ -1,4 +1,5 @@
-import { onCall } from 'firebase-functions/v2/https';
+import { onCall, onRequest } from 'firebase-functions/v2/https';
+import { https } from 'firebase-functions/v1';
 import { google } from '@ai-sdk/google';
 import { z } from 'zod';
 import { initializeApp } from 'firebase-admin/app';
@@ -170,8 +171,23 @@ async function analyzeBillingData({
   // Detect anomalies and calculate health score
   const { anomalies, healthScore } = detectAnomaliesAndScore(records, stats);
 
-  // Generate AI insights (simplified for emulator)
-  const insights = `BillIntel Analysis Complete. Total Revenue: KSH${stats.totalRevenue.toFixed(2)}, Health Score: ${healthScore}/100. ${anomalies.length} anomalies detected. Review the detailed metrics for actionable insights.`;
+  // Generate insights (simplified for production)
+  const insights = `BillIntel Analysis Complete
+
+📊 REVENUE INSIGHTS:
+• Total Revenue: KSH${stats.totalRevenue.toFixed(2)}
+• Average Bill per Customer: KSH${stats.avgBillPerCustomer.toFixed(2)}
+• Records Processed: ${records.length}
+
+🎯 HEALTH SCORE: ${healthScore}/100
+${healthScore >= 80 ? '✅ Excellent billing health' : healthScore >= 60 ? '⚠️ Good with room for improvement' : '❌ Needs attention'}
+
+${anomalies.length > 0 ? `⚠️ ${anomalies.length} anomalies detected` : '✅ No anomalies detected'}
+
+💡 RECOMMENDATIONS:
+• Monitor billing accuracy regularly
+• Analyze customer usage patterns
+• Review plan performance metrics`;
 
   return {
     session_id: sessionId,
@@ -259,15 +275,23 @@ export const billIntelAnalyzeFunction = onCall(
     region: 'us-central1',
   },
   async (request) => {
-    const { csv_data, json_data, userId } = request.data;
-    const result = await analyzeBillingData({ csv_data, json_data });
+    console.log('BillIntel analysis function called with data:', request.data);
 
-    // Save to Firestore if userId is provided
-    if (userId) {
-      await saveAnalysisToFirestore(userId, result.session_id, result);
+    try {
+      const { csv_data, json_data, userId } = request.data;
+      const result = await analyzeBillingData({ csv_data, json_data });
+
+      // Save to Firestore if userId is provided
+      if (userId) {
+        await saveAnalysisToFirestore(userId, result.session_id, result);
+      }
+
+      console.log('Analysis completed successfully:', result);
+      return result;
+    } catch (error) {
+      console.error('Error in analysis function:', error);
+      throw error;
     }
-
-    return result;
   },
 );
 
@@ -354,3 +378,38 @@ export const getUserDashboard = onCall(
     }
   },
 );
+
+// Export HTTP function for direct requests using v1
+export const billIntelAnalyzeHTTP = https.onRequest(async (req, res) => {
+  // Set CORS headers
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  if (req.method === 'OPTIONS') {
+    res.status(204).send('');
+    return;
+  }
+
+  if (req.method !== 'POST') {
+    res.status(405).send('Method Not Allowed');
+    return;
+  }
+
+  try {
+    console.log('HTTP function called with body:', req.body);
+    const { csv_data, json_data, userId } = req.body;
+    const result = await analyzeBillingData({ csv_data, json_data });
+
+    // Save to Firestore if userId is provided
+    if (userId) {
+      await saveAnalysisToFirestore(userId, result.session_id, result);
+    }
+
+    console.log('HTTP function returning result:', result);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('HTTP function error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});

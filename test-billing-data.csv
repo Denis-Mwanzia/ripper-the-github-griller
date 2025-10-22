@@ -1,7 +1,1 @@
-customer_id,plan,data_used,amount_billed,billing_date
-C001,Basic,45,2500,2025-01-15
-C002,Premium,120,5500,2025-01-15
-C003,Enterprise,200,8500,2025-01-15
-C004,Basic,30,1800,2025-01-16
-C005,Premium,80,4200,2025-01-16
-
+ 

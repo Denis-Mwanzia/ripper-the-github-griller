@@ -6,22 +6,12 @@ import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 
 // Firebase configuration
 const firebaseConfig = {
-  apiKey:
-    import.meta.env.VITE_FIREBASE_API_KEY ||
-    'AIzaSyAVGVRt_kUrxpxLGT9oqNXNVUhg27DjzzE',
-  authDomain:
-    import.meta.env.VITE_FIREBASE_AUTH_DOMAIN ||
-    'gen-lang-client-0921236969.firebaseapp.com',
-  projectId:
-    import.meta.env.VITE_FIREBASE_PROJECT_ID || 'gen-lang-client-0921236969',
-  storageBucket:
-    import.meta.env.VITE_FIREBASE_STORAGE_BUCKET ||
-    'gen-lang-client-0921236969.firebasestorage.app',
-  messagingSenderId:
-    import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '83063394983',
-  appId:
-    import.meta.env.VITE_FIREBASE_APP_ID ||
-    '1:83063394983:web:eabaaaccaf8204b59a8182',
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
 // Initialize Firebase
